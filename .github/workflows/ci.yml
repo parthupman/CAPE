@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: gitleaks (full history)
+        run: |
+          curl -sL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar xz gitleaks
+          ./gitleaks detect --source . --redact -v
+
+  identity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: no personal name or absolute path in a tracked file
+        env:
+          NAMES: ${{ secrets.IDENTITY_PATTERN }}
+        run: |
+          pattern='/User[s]/|/hom[e]/[a-z]+/'
+          if [ -n "$NAMES" ]; then pattern="$NAMES|$pattern"; fi
+          if git grep -qIiE "($pattern)" -- . ':!LICENSE'; then
+            echo "::error::a tracked file contains a personal name or an absolute path"
+            exit 1
+          fi
+
+  compile:
+    needs: [secrets, identity]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: every script compiles
+        run: python -m py_compile src/*.py scripts/*.py
